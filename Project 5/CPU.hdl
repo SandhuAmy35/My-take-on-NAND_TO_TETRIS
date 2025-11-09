@@ -1,0 +1,62 @@
+CHIP CPU {
+    IN  inM[16],
+        instruction[16],
+        reset;
+
+    OUT outM[16],
+        writeM,
+        addressM[15],
+        pc[15];
+
+    PARTS:
+    // Determine instruction type
+    Not(in=instruction[15], out=isAInstruction);
+
+    // A Register logic
+    And(a=isAInstruction, b=true, out=loadAFromInstruction);
+    And(a=instruction[15], b=instruction[5], out=loadAFromALU);
+    Or(a=loadAFromInstruction, b=loadAFromALU, out=loadA);
+    Mux16(a=instruction, b=aluOut, sel=instruction[15], out=aInput);
+    ARegister(in=aInput, load=loadA, out=aOut, out[0..14]=addressM);
+
+    // D Register
+    And(a=instruction[15], b=instruction[4], out=loadD);
+    DRegister(in=aluOut, load=loadD, out=dOut);
+
+    // Select Y input for ALU: M (inM) if a=1, else A
+    Mux16(a=aOut, b=inM, sel=instruction[12], out=y);
+
+    // ALU
+    ALU(x=dOut, y=y,
+        zx=instruction[11], nx=instruction[10],
+        zy=instruction[9], ny=instruction[8],
+        f=instruction[7], no=instruction[6],
+        out=aluOut, out=outM, zr=zr, ng=ng);
+
+    // Write to M: only if it's a C-instruction and d3=1
+    And(a=instruction[15], b=instruction[3], out=writeM);
+
+    // --- Jump logic fix ---
+
+    // JGT: jump if out > 0 → !zr & !ng
+    Not(in=zr, out=notZr);
+    Not(in=ng, out=notNg);
+    And(a=instruction[0], b=notZr, out=gtPart1);
+    And(a=gtPart1, b=notNg, out=jgt);
+
+    // JEQ: jump if out == 0 → zr
+    And(a=instruction[1], b=zr, out=jeq);
+
+    // JLT: jump if out < 0 → ng
+    And(a=instruction[2], b=ng, out=jlt);
+
+    // Combine all jump conditions
+    Or(a=jlt, b=jeq, out=tmp1);
+    Or(a=tmp1, b=jgt, out=jump);
+
+    // Only jump on C-instruction
+    And(a=instruction[15], b=jump, out=loadPC);
+
+    // Program Counter
+    PC(in=aOut, load=loadPC, inc=true, reset=reset, out[0..14]=pc);
+}
